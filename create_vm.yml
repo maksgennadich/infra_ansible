@@ -68,18 +68,23 @@
             memory: 4096
             intnet_ip: "{{ network_prefix }}.0.40"
 
+    - name: Инициализировать структуры для расширенных параметров ВМ
+      set_fact:
+        vm_definitions_enriched: []
+        vm_definition_lookup: {}
+
     - name: Дополнить параметры виртуальных машин сетями
       set_fact:
-        vm_definitions_enriched: "{{ (vm_definitions_enriched | default([])) + [ enriched_item ] }}"
-        vm_definition_lookup: "{{ (vm_definition_lookup | default({})) | combine({ item.name: enriched_item }) }}"
+        vm_definitions_enriched: "{{ vm_definitions_enriched + [enriched_item] }}"
+        vm_definition_lookup: "{{ vm_definition_lookup | combine({ item.name: enriched_item }) }}"
       vars:
-        networks_list: "{{ ((item.needs_extnet | default(false)) | ternary([{'network_id': extnet_network_id}], [])) + ((item.intnet_ip is defined) | ternary([{'network_id': intnet_network_id, 'ip': item.intnet_ip}], [])) }}"
-        enriched_item: "{{ item | combine({'networks': networks_list}) }}"
+        networks_list: "{{ ((item.needs_extnet | default(false)) | ternary([{'network_id': extnet_network_id | string}], [])) + ((item.intnet_ip is defined) | ternary([{'network_id': intnet_network_id | string, 'ip': item.intnet_ip}], [])) }}"
+        enriched_item: "{{ (item | combine({'networks': networks_list})) | to_json | from_json }}"
       loop: "{{ vm_definitions }}"
 
     - name: Сохранить итоговый список виртуальных машин
       set_fact:
-        vm_definitions: "{{ vm_definitions_enriched }}"
+        vm_definitions: "{{ vm_definitions_enriched | to_json | from_json }}"
 
   tasks:
     - name: Создать или обновить окружение
@@ -92,7 +97,7 @@
             name: "{{ env_name_resolved }}-{{ item.name }}"
             cpu: "{{ (item.cpu | float | round(0, 'ceil')) | int }}"
             vcpu: "{{ item.vcpu | int }}"
-            memory: "{{ item.memory | int }}MB"
+            memory: "{{ item.memory | int }}"
             labels: "{{ env_label }}"
             networks: "{{ item.networks | to_json | from_json }}"
             attributes:
