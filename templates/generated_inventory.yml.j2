@@ -1,0 +1,36 @@
+---
+all:
+  hosts:
+    rubackup_bastion:
+      ansible_host: {{ vm_network_data_local['rubackup_bastion']['public_ip'] }}
+      ansible_user: {{ ansible_user }}
+      ansible_ssh_private_key_file: {{ ssh_private_key_file }}
+      ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+    rubackup_server:
+      ansible_host: {{ vm_network_data_local['rubackup_server']['private_ip'] }}
+      ansible_user: {{ ansible_user }}
+      ansible_become: true
+      ansible_become_method: sudo
+      ansible_ssh_private_key_file: {{ ssh_private_key_file }}
+      ansible_ssh_common_args: {{ internal_ssh_common_args }}
+    rubackup_secondary-server:
+      ansible_host: {{ vm_network_data_local['rubackup_secondary-server']['private_ip'] }}
+      ansible_user: {{ ansible_user }}
+      ansible_become: true
+      ansible_become_method: sudo
+      ansible_ssh_private_key_file: {{ ssh_private_key_file }}
+      ansible_ssh_common_args: {{ internal_ssh_common_args }}
+    rubackup_media-server:
+      ansible_host: {{ vm_network_data_local['rubackup_media-server']['private_ip'] }}
+      ansible_user: {{ ansible_user }}
+      ansible_become: true
+      ansible_become_method: sudo
+      ansible_ssh_private_key_file: {{ ssh_private_key_file }}
+      ansible_ssh_common_args: {{ internal_ssh_common_args }}
+    rubackup_client:
+      ansible_host: {{ vm_network_data_local['rubackup_client']['private_ip'] }}
+      ansible_user: {{ ansible_user }}
+      ansible_become: true
+      ansible_become_method: sudo
+      ansible_ssh_private_key_file: {{ ssh_private_key_file }}
+      ansible_ssh_common_args: {{ internal_ssh_common_args }}

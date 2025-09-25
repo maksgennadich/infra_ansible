@@ -1,49 +1,193 @@
-- name: Create VMs in OpenNebula
+---
+- name: Управление виртуальными машинами в OpenNebula
   hosts: localhost
-  gather_facts: no
+  gather_facts: false
+  collections:
+    - community.general
+    - ansible.utils
   vars_files:
-    - "inventories/{{ inventory_file }}"
     - vars.yml
 
-  tasks:
-    - name: Check env vars
-      debug:
-        msg: "{{ intnet_network_id }} {{ extnet_network_id }} {{ labels }}"
+  vars:
+    vm_state: "{{ state | default('present') }}"
+    ssh_private_key_file: "{{ ssh_key_path | default(playbook_dir + '/id_rsa') }}"
 
-    - name: Create VMs from template
-      community.general.one_vm:
-        template_id: 5785
-        cpu: "{{ (item.cpu | float | round(0, 'ceil')) | int }}"
-        vcpu: "{{ item.vcpu | int }}"
-        memory: "{{ item.memory | int }}MB"
-        labels: "{{ labels }}"
-        networks: >-
-          {{
-            (
-              (item.extnet_network_id is defined) | ternary(
-                [{'network_id': extnet_network_id}], []
-              )
-            )
-            +
-            (
-              (item.intnet_network_id is defined) | ternary(
-                [{'network_id': intnet_network_id, 'ip': item.intnet_ip}], []
-              )
-            )
-          }}
-        attributes:
-          NAME: "{{ item.name }}"
-        state: present
-        api_url: "{{ one_endpoint }}"
-        api_username: "{{ one_user }}"
-        api_password: "{{ one_password }}"
-        wait: yes
-        wait_timeout: 600
-      loop:
-        - { name: "rubackup_bastion", cpu: 1, vcpu: 2, memory: 2048, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.100", extnet_network_id: true }
-        - { name: "rubackup_server", cpu: 1, vcpu: 4, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.10" }
-        - { name: "rubackup_secondary-server", cpu: 1, vcpu: 4, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.20" }
-        - { name: "rubackup_media-server", cpu: 1, vcpu: 4, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.30" }
-        - { name: "rubackup_client", cpu: 1, vcpu: 2, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.40" }
-      loop_control:
-        label: "{{ item.name }}"
+  pre_tasks:
+    - name: Проверить, что указано окружение
+      assert:
+        that:
+          - env is defined
+          - env | length > 0
+        fail_msg: "Укажите переменную env, например -e env=st-11"
+
+    - name: Загрузить параметры окружения
+      include_vars:
+        file: "inventories/{{ env }}.yml"
+
+    - name: Установить имя и метку окружения
+      set_fact:
+        env_name_resolved: "{{ env_name | default(env) }}"
+        env_label: "{{ labels | default(env_name | default(env)) }}"
+
+    - name: Проверить корректность параметров окружения
+      assert:
+        that:
+          - vm_state in ['present', 'absent']
+          - intnet_network_id is defined
+          - network_prefix is defined
+          - (vm_state == 'absent') or (extnet_network_id is defined)
+        fail_msg: "Проверьте значения intnet_network_id, extnet_network_id и network_prefix в inventories/{{ env }}.yml"
+
+    - name: Сформировать список виртуальных машин
+      set_fact:
+        vm_definitions:
+          - name: rubackup_bastion
+            cpu: 1
+            vcpu: 2
+            memory: 2048
+            intnet_ip: "{{ network_prefix }}.0.100"
+            needs_extnet: true
+          - name: rubackup_server
+            cpu: 1
+            vcpu: 4
+            memory: 4096
+            intnet_ip: "{{ network_prefix }}.0.10"
+          - name: rubackup_secondary-server
+            cpu: 1
+            vcpu: 4
+            memory: 4096
+            intnet_ip: "{{ network_prefix }}.0.20"
+          - name: rubackup_media-server
+            cpu: 1
+            vcpu: 4
+            memory: 4096
+            intnet_ip: "{{ network_prefix }}.0.30"
+          - name: rubackup_client
+            cpu: 1
+            vcpu: 2
+            memory: 4096
+            intnet_ip: "{{ network_prefix }}.0.40"
+
+    - name: Инициализировать структуры для расширенных параметров ВМ
+      set_fact:
+        vm_definitions_enriched: []
+        vm_definition_lookup: {}
+
+    - name: Дополнить параметры виртуальных машин сетями
+      set_fact:
+        vm_definitions_enriched: "{{ vm_definitions_enriched + [enriched_item] }}"
+        vm_definition_lookup: "{{ vm_definition_lookup | combine({ item.name: enriched_item }) }}"
+      vars:
+        networks_list: "{{ ((item.needs_extnet | default(false)) | ternary([{'network_id': extnet_network_id | string}], [])) + ((item.intnet_ip is defined) | ternary([{'network_id': intnet_network_id | string, 'ip': item.intnet_ip}], [])) }}"
+        enriched_item: "{{ (item | combine({'networks': networks_list})) | to_json | from_json }}"
+      loop: "{{ vm_definitions }}"
+
+    - name: Сохранить итоговый список виртуальных машин
+      set_fact:
+        vm_definitions: "{{ vm_definitions_enriched | to_json | from_json }}"
+
+  tasks:
+    - name: Создать или обновить окружение
+      when: vm_state == 'present'
+      block:
+        - name: Создать или обновить {{ item.name }}
+          community.general.one_vm:
+            state: present
+            template_id: "{{ vm_template_id }}"
+            name: "{{ env_name_resolved }}-{{ item.name }}"
+            cpu: "{{ (item.cpu | float | round(0, 'ceil')) | int }}"
+            vcpu: "{{ item.vcpu | int }}"
+            memory: "{{ item.memory | int }}"
+            labels: "{{ env_label }}"
+            networks: "{{ item.networks | to_json | from_json }}"
+            attributes:
+              NAME: "{{ env_name_resolved }}-{{ item.name }}"
+              ROLE: "{{ item.name }}"
+            api_url: "{{ one_endpoint }}"
+            api_username: "{{ one_user }}"
+            api_password: "{{ one_password }}"
+            wait: true
+            wait_timeout: 600
+          loop: "{{ vm_definitions }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Собрать информацию о виртуальных машинах окружения
+          community.general.one_vm_info:
+            api_url: "{{ one_endpoint }}"
+            api_username: "{{ one_user }}"
+            api_password: "{{ one_password }}"
+            filter_str: "LABELS=\"{{ env_label }}\""
+          register: env_vm_info
+
+        - name: Построить карту IP-адресов по ролям
+          set_fact:
+            vm_network_data: "{{ vm_network_data | default({}) | combine(new_entry) }}"
+          vars:
+            vm_item: "{{ item }}"
+            vm_name: "{{ vm_item.name | default(vm_item.NAME) }}"
+            vm_template: "{{ vm_item.template | default(vm_item.TEMPLATE) | default({}) }}"
+            vm_user_template: "{{ vm_item.user_template | default(vm_item.USER_TEMPLATE) | default({}) }}"
+            vm_role: "{{ vm_user_template.ROLE | default(vm_name | regex_replace('^' ~ env_name_resolved ~ '-', '')) }}"
+            vm_nics: "{{ (vm_template.NIC | default([])) | ansible.utils.to_list }}"
+            vm_private_ip: "{{ (vm_nics | selectattr('NETWORK_ID', 'equalto', intnet_network_id | string) | map(attribute='IP') | list | first) | default(vm_definition_lookup.get(vm_role, {}).intnet_ip | default('')) }}"
+            vm_public_ip: "{{ (vm_nics | selectattr('NETWORK_ID', 'equalto', extnet_network_id | string) | map(attribute='IP') | list | first) | default('') }}"
+            new_entry:
+              "{{ vm_role }}":
+                private_ip: "{{ vm_private_ip }}"
+                public_ip: "{{ vm_public_ip }}"
+          loop: "{{ env_vm_info.opennebula_vms | default([]) }}"
+          when: vm_role | length > 0
+
+        - name: Проверить, что найдены все виртуальные машины окружения
+          assert:
+            that:
+              - vm_network_data.get(item.name) is defined
+              - vm_network_data[item.name].private_ip | length > 0
+            fail_msg: "Не удалось определить IP-адрес для {{ item.name }}"
+          loop: "{{ vm_definitions }}"
+
+        - name: Проверить наличие внешнего адреса бастиона
+          assert:
+            that:
+              - vm_network_data['rubackup_bastion'].public_ip | length > 0
+            fail_msg: "Не удалось получить внешний IP-адрес bastion"
+
+        - name: Подготовить параметры SSH для внутренних машин
+          set_fact:
+            internal_ssh_common_args: "-o ProxyCommand=\"ssh -W %h:%p -o StrictHostKeyChecking=no -i {{ ssh_private_key_file }} {{ ansible_user }}@{{ vm_network_data['rubackup_bastion'].public_ip }}\" -o StrictHostKeyChecking=no"
+
+        - name: Обеспечить каталог для динамических инвентарей
+          file:
+            path: generated_inventories
+            state: directory
+            mode: "0755"
+
+        - name: Сгенерировать инвентарь для окружения
+          template:
+            src: templates/generated_inventory.yml.j2
+            dest: "generated_inventories/{{ env }}.yml"
+            mode: "0644"
+          vars:
+            vm_network_data_local: "{{ vm_network_data }}"
+
+    - name: Удалить окружение
+      when: vm_state == 'absent'
+      block:
+        - name: Удалить {{ item.name }}
+          community.general.one_vm:
+            state: absent
+            name: "{{ env_name_resolved }}-{{ item.name }}"
+            api_url: "{{ one_endpoint }}"
+            api_username: "{{ one_user }}"
+            api_password: "{{ one_password }}"
+            wait: true
+            wait_timeout: 600
+          loop: "{{ vm_definitions }}"
+          loop_control:
+            label: "{{ item.name }}"
+
+        - name: Удалить сгенерированный инвентарь окружения
+          file:
+            path: "generated_inventories/{{ env }}.yml"
+            state: absent
