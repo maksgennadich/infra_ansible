@@ -1,0 +1,49 @@
+- name: Create VMs in OpenNebula
+  hosts: localhost
+  gather_facts: no
+  vars_files:
+    - "inventories/{{ inventory_file }}"
+    - vars.yml
+
+  tasks:
+    - name: Check env vars
+      debug:
+        msg: "{{ intnet_network_id }} {{ extnet_network_id }} {{ labels }}"
+
+    - name: Create VMs from template
+      community.general.one_vm:
+        template_id: 5785
+        cpu: "{{ (item.cpu | float | round(0, 'ceil')) | int }}"
+        vcpu: "{{ item.vcpu | int }}"
+        memory: "{{ item.memory | int }}MB"
+        labels: "{{ labels }}"
+        networks: >-
+          {{
+            (
+              (item.extnet_network_id is defined) | ternary(
+                [{'network_id': extnet_network_id}], []
+              )
+            )
+            +
+            (
+              (item.intnet_network_id is defined) | ternary(
+                [{'network_id': intnet_network_id, 'ip': item.intnet_ip}], []
+              )
+            )
+          }}
+        attributes:
+          NAME: "{{ item.name }}"
+        state: present
+        api_url: "{{ one_endpoint }}"
+        api_username: "{{ one_user }}"
+        api_password: "{{ one_password }}"
+        wait: yes
+        wait_timeout: 600
+      loop:
+        - { name: "rubackup_bastion", cpu: 1, vcpu: 2, memory: 2048, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.100", extnet_network_id: true }
+        - { name: "rubackup_server", cpu: 1, vcpu: 4, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.10" }
+        - { name: "rubackup_secondary-server", cpu: 1, vcpu: 4, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.20" }
+        - { name: "rubackup_media-server", cpu: 1, vcpu: 4, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.30" }
+        - { name: "rubackup_client", cpu: 1, vcpu: 2, memory: 4096, intnet_network_id: true, intnet_ip: "{{ network_prefix }}.0.40" }
+      loop_control:
+        label: "{{ item.name }}"

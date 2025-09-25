@@ -1,0 +1,6 @@
+---
+env_name: "st-10"
+intnet_network_id: 657
+extnet_network_id: 656
+network_prefix: "10.2"
+labels: "st-10"

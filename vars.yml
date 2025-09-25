@@ -1,0 +1,9 @@
+one_user: "dc-practicum-rubackup"
+one_password: "54552921c9dcb8a23a336808a74ae48e0fa3c7aabc5fef3f1c487967464d10de"
+one_endpoint: "http://10.205.236.43:2633/RPC2"
+
+vm_template_id: 5785
+vm_group: "dc-practicum-rubackup-group"
+
+ansible_user: astra
+ansible_password: "Astra$14"

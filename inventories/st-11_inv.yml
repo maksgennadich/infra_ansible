@@ -1,0 +1,47 @@
+all:
+  hosts:
+    rubackup_bastion:
+      ansible_host: 62.113.82.175
+      ansible_user: astra
+      ansible_ssh_private_key_file: id_rsa
+      ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+      
+    rubackup_server:
+      ansible_host: 10.2.0.10
+      ansible_user: astra
+      ansible_ssh_private_key_file: id_rsa
+      ansible_become: yes
+      ansible_become_method: sudo
+      ansible_ssh_common_args: >
+        -o ProxyCommand="ssh -W %h:%p -o StrictHostKeyChecking=no -i id_rsa astra@62.113.82.175"
+        -o StrictHostKeyChecking=no
+
+    rubackup_secondary-server:
+      ansible_host: 10.2.0.20
+      ansible_user: astra
+      ansible_ssh_private_key_file: id_rsa
+      ansible_become: yes
+      ansible_become_method: sudo
+      ansible_ssh_common_args: >
+        -o ProxyCommand="ssh -W %h:%p -o StrictHostKeyChecking=no -i id_rsa astra@62.113.82.175"
+        -o StrictHostKeyChecking=no
+
+    rubackup_media-server:
+      ansible_host: 10.2.0.30
+      ansible_user: astra
+      ansible_ssh_private_key_file: id_rsa
+      ansible_become: yes
+      ansible_become_method: sudo
+      ansible_ssh_common_args: >
+        -o ProxyCommand="ssh -W %h:%p -o StrictHostKeyChecking=no -i id_rsa astra@62.113.82.175"
+        -o StrictHostKeyChecking=no
+
+    rubackup_client:
+      ansible_host: 10.2.0.40
+      ansible_user: astra
+      ansible_ssh_private_key_file: id_rsa
+      ansible_become: yes
+      ansible_become_method: sudo
+      ansible_ssh_common_args: >
+        -o ProxyCommand="ssh -W %h:%p -o StrictHostKeyChecking=no -i id_rsa astra@62.113.82.175"
+        -o StrictHostKeyChecking=no

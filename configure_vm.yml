@@ -1,0 +1,101 @@
+---
+- name: Setup SSH keys using password auth first
+  hosts: all
+  gather_facts: false
+  
+  tasks:
+    - name: Ensure .ssh directory exists
+      become: yes
+      file:
+        path: /home/astra/.ssh
+        state: directory
+        mode: 0700
+        owner: astra
+        group: astra
+
+    - name: Deploy public key to authorized_keys
+      become: yes
+      copy:
+        content: "{{ lookup('file', 'id_rsa.pub') }}"  # Ключ рядом с плейбуком
+        dest: /home/astra/.ssh/authorized_keys
+        mode: 0600
+        owner: astra
+        group: astra
+
+- name: Configure network and hostnames
+  hosts: rubackup_bastion
+  become: yes
+  tasks:
+    - name: Bring up eth1 and assign internal IP on bastion
+      shell: |
+        ip link set eth1 up
+        ip addr add 10.2.0.100/24 dev eth1 || true
+
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Set up NAT for internal network
+      iptables:
+        table: nat
+        chain: POSTROUTING
+        out_interface: eth0
+        source: '10.2.0.0/24'
+        jump: MASQUERADE
+
+- name: Configure internal VMs
+  hosts: rubackup_server,rubackup_client,rubackup_secondary-server,rubackup_media-server
+  become: yes
+  tasks:
+    - name: Set default gateway to bastion
+      shell: ip route replace default via 10.2.0.100
+
+    - name: Set hostname based on role
+      hostname:
+        name: "{{ 
+          'server' if inventory_hostname in groups['rubackup_server'] 
+          else 'client' if inventory_hostname in groups['rubackup_client'] 
+          else 'secondary' if inventory_hostname in groups['rubackup_secondary-server'] 
+          else 'media' 
+        }}"
+
+    - name: Update /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127\\.0\\.1\\.1\\s+'
+        line: "127.0.1.1 {{ ansible_hostname }}"
+        state: present
+
+    - name: Install packages on server and client
+      apt:
+        name:
+          - xrdp
+          - fly-all-main
+        state: present
+        update_cache: yes
+      when: inventory_hostname in groups['rubackup_server'] or inventory_hostname in groups['rubackup_client']
+
+- name: Setup RDP port forwarding
+  hosts: rubackup_bastion
+  become: yes
+  tasks:
+    - name: Forward RDP to server
+      iptables:
+        table: nat
+        chain: PREROUTING
+        protocol: tcp
+        destination_port: 3389
+        jump: DNAT
+        to_destination: "{{ hostvars[groups['rubackup_server'][0]].ansible_host }}:3389"
+
+    - name: Forward RDP to client
+      iptables:
+        table: nat
+        chain: PREROUTING
+        protocol: tcp
+        destination_port: 3392
+        jump: DNAT
+        to_destination: "{{ hostvars[groups['rubackup_client'][0]].ansible_host }}:3389"
